@@ -12,6 +12,7 @@ import json
 from hrd_tools.config import (
     AnalyzerConfig,
     DetectorConfig,
+    Diffractometer,
     SimConfig,
     SimScanConfig,
     SourceConfig,
@@ -173,11 +174,12 @@ if __name__ == "__main__":
         "sim": SimConfig,
         "detector": DetectorConfig,
         "analyzer": AnalyzerConfig,
+        "diffractometer": Diffractometer,
     }
     with args.config.open("rb") as fin:
         inp = tomllib.load(fin)
 
-    configs = {k: cls(**inp[k]) for k, cls in class_map.items()}
+    configs = {k: cls(**inp[k]) if k in inp else cls() for k, cls in class_map.items()}
     invocation = GeneratorInvocation(**inp["generator"])
 
     fin = Path(configs["source"].pattern_path).resolve()

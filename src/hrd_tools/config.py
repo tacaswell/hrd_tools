@@ -89,12 +89,25 @@ class SimScanConfig:
 
 
 @dataclass(frozen=True)
+class Diffractometer:
+    # rotation about the y-axis (beam direction) in degrees
+    roll: float = 0.0
+    # rotation about the z-axis (vertical) in degrees
+    yaw: float = 0.0
+    # displacement of center of rotation from source center in mm
+    dx: float = 0.0
+    dy: float = 0.0
+    dz: float = 0.0
+
+
+@dataclass(frozen=True)
 class CompleteConfig:
     source: SourceConfig
     sim: SimConfig
     detector: DetectorConfig
     analyzer: AnalyzerConfig
     scan: SimScanConfig
+    diffractometer: Diffractometer = Diffractometer()
 
 
 @dataclass(frozen=True)

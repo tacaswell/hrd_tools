@@ -26,6 +26,7 @@ from hrd_tools.config import (
     AnalyzerConfig,
     CompleteConfig,
     DetectorConfig,
+    Diffractometer,
     SimConfig,
     SimScanConfig,
     SourceConfig,
@@ -122,6 +123,7 @@ def get_defaults(start=20, stop=20.5):
                 roll=0,
             ),
             "scan": SimScanConfig(start=start, stop=stop, delta=1e-4),
+            "diffractometer": Diffractometer(),
         }
     )
     config = _pad_source_range(config)
@@ -156,6 +158,7 @@ def convert_cycler(cycle: Cycler) -> list[CompleteConfig]:
 config_classes = [
     AnalyzerConfig,
     DetectorConfig,
+    Diffractometer,
     SimConfig,
     SourceConfig,
     SimScanConfig,

@@ -9,6 +9,7 @@ import pandas as pd
 from .config import (
     AnalyzerCalibration,
     CompleteConfig,
+    Diffractometer,
     SimScanConfig,
 )
 
@@ -35,7 +36,7 @@ def load_config_from_group(grp):
         try:
             config_grp = grp[f"{fld.name}_config"]
         except KeyError:
-            if fld.name != "scan":
+            if fld.name not in ("scan", "diffractometer"):
                 print(f"missing {fld.name}")
         else:
             config_attrs = dict(**config_grp.attrs)

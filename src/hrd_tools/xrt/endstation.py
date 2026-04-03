@@ -1,5 +1,5 @@
 import functools
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Self
 
 import numpy as np
@@ -9,7 +9,14 @@ import xrt.backends.raycing.materials as rmats
 import xrt.backends.raycing.oes as roes
 import xrt.backends.raycing.screens as rscreens
 
-from ..config import AnalyzerConfig, DetectorConfig, SimConfig, SourceConfig
+from ..config import (
+    AnalyzerConfig,
+    DetectorConfig,
+    Diffractometer,
+    SimConfig,
+    SourceConfig,
+)
+from .geometry import compute_arm_positions
 from .sources import XrdSource
 from .stops import RectangularBeamstop
 
@@ -21,6 +28,7 @@ class Endstation:
     source: SourceConfig
     detector: DetectorConfig
     sim: SimConfig
+    diffractometer: Diffractometer = field(default_factory=Diffractometer)
 
     @classmethod
     def from_configs(
@@ -29,7 +37,11 @@ class Endstation:
         source: SourceConfig,
         detector: DetectorConfig,
         sim: SimConfig,
+        diffractometer: Diffractometer | None = None,
     ) -> Self:
+        if diffractometer is None:
+            diffractometer = Diffractometer()
+
         crystalSi01 = rmats.CrystalSi(t=analyzer.thickness)
         theta_b = _bragg(crystalSi01, source.E_incident)
         analyzer = replace(analyzer, incident_angle=np.rad2deg(theta_b))
@@ -75,36 +87,18 @@ class Endstation:
             bl=beamLine, center=[0, 150, r"auto"], name="main"
         )
 
-        for j in range(analyzer.N):
-            cry_tth = arm_tth + j * analyzer.cry_offset
-            # accept xrt coordinates
-            cry_y = analyzer.R * np.cos(cry_tth)
-            cry_z = analyzer.R * np.sin(cry_tth)
-
-            # TODO These are all wrong but are fixed up by set_crystals
-            pitch = -cry_tth + theta_b
-
-            baffle_tth = arm_tth + (j + 0.5) * analyzer.cry_offset
-            baffle_pitch = np.pi / 4 - (2 * theta_b - baffle_tth)
-
-            baffle_y = (
-                analyzer.R * np.cos(baffle_tth)
-                + analyzer.Rd / 2 * np.cos(baffle_pitch),
-            )
-            baffle_z = analyzer.R * np.sin(baffle_tth) - analyzer.Rd / 2 * np.sin(
-                baffle_pitch
-            )
-
-            theta_pp = np.pi / 4 - (2 * theta_b - cry_tth)
-
+        placements = compute_arm_positions(
+            arm_tth, analyzer, theta_b, diffractometer
+        )
+        for j, p in enumerate(placements):
             setattr(
                 beamLine,
                 f"oe{j:02d}",
                 roes.OE(
                     name=f"cry{j:02d}",
                     bl=beamLine,
-                    center=[0, cry_y, cry_z],
-                    pitch=pitch,
+                    center=list(p.crystal_center),
+                    pitch=p.crystal_pitch,
                     positionRoll=np.pi,
                     material=crystalSi01,
                     limPhysX=[-analyzer.cry_width / 2, analyzer.cry_width / 2],
@@ -124,31 +118,22 @@ class Endstation:
                         -0.7 * analyzer.Rd / 2,
                         0.7 * analyzer.Rd / 2,
                     ],
-                    center=[0, baffle_y, baffle_z],
-                    z=(
-                        0,
-                        np.sin(baffle_pitch - np.pi / 2),
-                        np.cos(baffle_pitch - np.pi / 2),
-                    ),
+                    center=list(p.baffle_center),
+                    z=tuple(p.baffle_z),
                 ),
             )
-            screen_angle = theta_pp
             setattr(
                 beamLine,
                 f"screen{j:02d}",
                 rscreens.Screen(
                     bl=beamLine,
-                    center=[
-                        0,
-                        cry_y + analyzer.Rd * np.cos(theta_pp),
-                        cry_z - analyzer.Rd * np.sin(theta_pp),
-                    ],
+                    center=list(p.screen_center),
                     x=(1, 0, 0),
-                    z=(0, np.sin(screen_angle), np.cos(screen_angle)),
+                    z=tuple(p.screen_z),
                 ),
             )
 
-        return cls(beamLine, analyzer, source, detector, sim)
+        return cls(beamLine, analyzer, source, detector, sim, diffractometer)
 
     @property
     def crystals(self):
@@ -159,57 +144,26 @@ class Endstation:
         return [oe for oe in self.bl.slits if oe.name.startswith("baffle")]
 
     def set_arm(self, arm_tth: float):
-        config = self.analyzer
         crystals = self.crystals
         baffles = self.baffles
         screens = self.bl.screens[1:]
 
         theta_b = _bragg(crystals[0].material, self.source.E_incident)
 
-        offset = config.cry_offset
-        for j, (cry, baffle, screen) in enumerate(
-            zip(crystals, baffles, screens, strict=True)
+        placements = compute_arm_positions(
+            arm_tth, self.analyzer, theta_b, self.diffractometer
+        )
+        for p, cry, baffle, screen in zip(
+            placements, crystals, baffles, screens, strict=True
         ):
-            cry_tth = arm_tth + j * offset
-            # accept xrt coordinates
-            # x: inboard/outboard
-            # y: upstream/downstream
-            # z: up/down
-            cry_y = config.R * np.cos(cry_tth)
-            cry_z = config.R * np.sin(cry_tth)
-            pitch = -cry_tth + theta_b
+            cry.center = list(p.crystal_center)
+            cry.pitch = p.crystal_pitch
 
-            cry.center = [0, cry_y, cry_z]
-            cry.pitch = pitch
+            baffle.center = list(p.baffle_center)
+            baffle.z = tuple(p.baffle_z)
 
-            theta_pp = theta_b + pitch
-
-            baffle_tth = arm_tth + (j - 0.5) * offset
-            baffle_pitch = 2 * theta_b - baffle_tth
-
-            baffle_y = (
-                config.R * np.cos(baffle_tth) + config.Rd / 2 * np.cos(baffle_pitch),
-            )
-            baffle_z = config.R * np.sin(baffle_tth) - config.Rd / 2 * np.sin(
-                baffle_pitch
-            )
-
-            baffle.center = [0, baffle_y, baffle_z]
-            baffle.z = (
-                0,
-                np.sin(baffle_pitch - np.pi / 2),
-                np.cos(baffle_pitch - np.pi / 2),
-            )
-
-            screen.center = [
-                0,
-                cry_y + config.Rd * np.cos(theta_pp),
-                cry_z - config.Rd * np.sin(theta_pp),
-            ]
-
-            screen_angle = theta_pp
-
-            screen.z = (0, np.sin(screen_angle), np.cos(screen_angle))
+            screen.center = list(p.screen_center)
+            screen.z = tuple(p.screen_z)
 
     def run_process(self):
         # "raw" beam

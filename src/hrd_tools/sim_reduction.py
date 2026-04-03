@@ -110,7 +110,7 @@ def load_config_from_tiled(grp: tiled.client.container.Container):
         try:
             config_grp = md[fld.name]
         except KeyError:
-            if fld.name != "scan":
+            if fld.name not in ("scan", "diffractometer"):
                 print(f"missing {fld.name}")
         else:
             if fld.name == "analyzer" and "acceptance_angle" in config_grp:
